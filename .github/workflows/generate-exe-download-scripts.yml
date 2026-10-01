@@ -1,77 +1,90 @@
 name: Generate EXE download scripts
 
 on:
-  push:
-    paths:
-      - '**/*.exe'
-      - '**/*.EXE'
+push:
+paths:
+- '**/*.exe'
+- '**/*.EXE'
 
 permissions:
-  contents: write
+contents: write
 
 jobs:
-  generate-scripts:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+generate-scripts:
+runs-on: ubuntu-latest
+steps:
+- name: Checkout
+uses: actions/checkout@v4
+with:
+fetch-depth: 0
 
-      - name: Generate extensionless PowerShell scripts
-        shell: bash
-        run: |
-          set -euo pipefail
-          changed=0
+```
+  - name: Generate extensionless PowerShell scripts
+    shell: bash
+    env:
+      REPO_OWNER: ${{ github.repository_owner }}
+      REPO_NAME: ${{ github.event.repository.name }}
+      BRANCH: ${{ github.ref_name }}
+    run: |
+      set -euo pipefail
+      changed=0
 
-          while IFS= read -r -d '' exe_file; do
-            dir="$(dirname "$exe_file")"
-            filename="$(basename "$exe_file")"
-            base="${filename%.*}"
-            output_path="$dir/$base"
+      while IFS= read -r -d '' exe_file; do
+        dir="$(dirname "$exe_file")"
+        filename="$(basename "$exe_file")"
+        base="${filename%.*}"
+        output_path="$dir/$base"
 
-            cat > "$output_path" <<SCRIPT
-# Auto-generated script for: $filename
+        cat > "$output_path" <<'SCRIPT'
 
-\$ErrorActionPreference = 'Stop'
-\$repoOwner = '${{ github.repository_owner }}'
-\$repoName = '${{ github.event.repository.name }}'
-\$branch = '${{ github.ref_name }}'
-\$relativePath = '$exe_file'
-\$encodedPath = (\$relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString(\$_) }) -join '/'
-\$url = "https://raw.githubusercontent.com/\$repoOwner/\$repoName/\$branch/\$encodedPath"
-\$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '$filename'
+```
 
-Write-Host "Downloading \$filename..."
-Invoke-WebRequest -Uri \$url -OutFile \$destination
-Write-Host "Downloaded to: \$destination"
+# Auto-generated script
 
-# Remove MotW (Mark of the Web) so Windows allows execution
-Unblock-File -Path \$destination
+$ErrorActionPreference = 'Stop'
+$repoOwner = '**REPO_OWNER**'$repoName = '**REPO_NAME**'
+$branch = '**BRANCH**'$relativePath = '**EXE_FILE**'
+$encodedPath = ($relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'$url = "[https://raw.githubusercontent.com/$repoOwner/$repoName/$branch/$encodedPath](https://www.google.com/search?q=https%3A%2F%2Fraw.githubusercontent.com%2F%24repoOwner%2F%24repoName%2F%24branch%2F%24encodedPath)"
+$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '**FILENAME**'
 
-Write-Host "Executing \$filename..."
-Start-Process -FilePath \$destination -Wait
+Write-Host "Downloading **FILENAME**..."
+Invoke-WebRequest -Uri $url -OutFile$destination
+Write-Host "Downloaded to: $destination"
+
+Unblock-File -Path $destination
+
+Write-Host "Executing **FILENAME**..."
+Start-Process -FilePath $destination -Wait
 SCRIPT
 
-            chmod 644 "$output_path"
-            changed=1
-          done < <(find . -type f \( -iname '*.exe' \) -print0)
+```
+        sed -i "s|__REPO_OWNER__|$REPO_OWNER\vert{}g" "$output_path"
+        sed -i "s|__REPO_NAME__|$REPO_NAME\vert{}g" "$output_path"
+        sed -i "s|__BRANCH__|$BRANCH\vert{}g" "$output_path"
+        sed -i "s|__EXE_FILE__|$exe_file\vert{}g" "$output_path"
+        sed -i "s|__FILENAME__|$filename\vert{}g" "$output_path"
 
-          if [[ "$changed" -eq 0 ]]; then
-            echo "No .exe files found."
-          fi
+        chmod 644 "$output_path"
+        changed=1
+      done < <(find . -type f \(-iname '*.exe'\) -print0)
 
-      - name: Commit generated scripts
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet; then
-            echo "No generated script changes to commit."
-            exit 0
-          fi
+      if [[ "$changed" -eq 0 ]]; then
+        echo "No .exe files found."
+      fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "Generate download and execute scripts with Unblock-File for EXE files"
-          git push
+  - name: Commit generated scripts
+    shell: bash
+    run: |
+      set -euo pipefail
+      if git diff --quiet; then
+        echo "No generated script changes to commit."
+        exit 0
+      fi
+
+      git config user.name "github-actions[bot]"
+      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      git add .
+      git commit -m "Generate download and execute scripts for EXE files"
+      git push
+
+```
