@@ -1,3 +1,4 @@
+
 name: Generate EXE download scripts
 
 on:
@@ -11,6 +12,7 @@ permissions:
 jobs:
   generate-scripts:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,10 +24,20 @@ jobs:
         env:
           REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
-          BRANCH: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          changed=0
+
+          generated_files=()
+
+          # Encode values so special characters cannot break the script.
+          encode() {
+            printf '%s' "$1" | base64 -w 0
+          }
+
+          owner_b64="$(encode "$REPO_OWNER")"
+          repo_b64="$(encode "$REPO_NAME")"
+          commit_b64="$(encode "$COMMIT_SHA")"
 
           while IFS= read -r -d '' exe_file; do
             clean_path="${exe_file#./}"
@@ -33,65 +45,104 @@ jobs:
             filename="$(basename "$clean_path")"
             base="${filename%.*}"
 
-            if [ "$dir" = "." ]; then
+            if [[ "$dir" == "." ]]; then
               output_path="$base"
             else
               output_path="$dir/$base"
             fi
 
-            # 1. יצירת תבנית הסקריפט
-            cat <<'SCRIPT' > "$output_path"
-# Auto-generated script
-$ErrorActionPreference = 'Stop'
-$repoOwner = '__REPO_OWNER__'
-$repoName = '__REPO_NAME__'
-$branch = '__BRANCH__'
-$relativePath = '__RELATIVE_PATH__'
-$encodedPath = ($relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
-$url = "https://raw.githubusercontent.com/$repoOwner/$repoName/$branch/$encodedPath"
-$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '__FILENAME__'
+            path_b64="$(encode "$clean_path")"
+            filename_b64="$(encode "$filename")"
 
-Write-Host "Downloading __FILENAME__..."
-Invoke-WebRequest -Uri $url -OutFile $destination
-Write-Host "Downloaded to: $destination"
+            cat > "$output_path" <<'POWERSHELL'
+          # Auto-generated PowerShell download and execution script.
+          $ErrorActionPreference = 'Stop'
 
-Unblock-File -Path $destination
+          function Decode-Base64([string]$value) {
+              return [System.Text.Encoding]::UTF8.GetString(
+                  [System.Convert]::FromBase64String($value)
+              )
+          }
 
-Write-Host "Executing __FILENAME__..."
-Start-Process -FilePath $destination -Wait
-SCRIPT
+          $repoOwner = Decode-Base64 '__REPO_OWNER_B64__'
+          $repoName = Decode-Base64 '__REPO_NAME_B64__'
+          $commitSha = Decode-Base64 '__COMMIT_SHA_B64__'
+          $relativePath = Decode-Base64 '__RELATIVE_PATH_B64__'
+          $filename = Decode-Base64 '__FILENAME_B64__'
 
-            # 2. הזרקה בטוחה של המשתנים לתוך הקובץ
-            FILE_PATH="$output_path" REL_PATH="$clean_path" FILE_NAME="$filename" python3 -c '
-import os
-path = os.environ["FILE_PATH"]
-with open(path, "r") as f:
-    content = f.read()
+          $encodedPath = (
+              $relativePath -split '/' |
+              ForEach-Object {
+                  [System.Uri]::EscapeDataString($_)
+              }
+          ) -join '/'
 
-content = content.replace("__REPO_OWNER__", os.environ["REPO_OWNER"])
-content = content.replace("__REPO_NAME__", os.environ["REPO_NAME"])
-content = content.replace("__BRANCH__", os.environ["BRANCH"])
-content = content.replace("__RELATIVE_PATH__", os.environ["REL_PATH"])
-content = content.replace("__FILENAME__", os.environ["FILE_NAME"])
+          $url = "https://raw.githubusercontent.com/$repoOwner/$repoName/$commitSha/$encodedPath"
 
-with open(path, "w") as f:
-    f.write(content)
-'
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $destination = Join-Path $desktop $filename
+
+          Write-Host "Downloading $filename..."
+          Invoke-WebRequest -Uri $url -OutFile $destination
+
+          Unblock-File -Path $destination
+
+          Write-Host "Downloaded to: $destination"
+          Write-Host "Executing $filename..."
+
+          Start-Process -FilePath $destination -Wait
+          POWERSHELL
+
+            # Replace placeholders with Base64-only values.
+            sed -i \
+              -e "s|__REPO_OWNER_B64__|$owner_b64|g" \
+              -e "s|__REPO_NAME_B64__|$repo_b64|g" \
+              -e "s|__COMMIT_SHA_B64__|$commit_b64|g" \
+              -e "s|__RELATIVE_PATH_B64__|$path_b64|g" \
+              -e "s|__FILENAME_B64__|$filename_b64|g" \
+              "$output_path"
 
             chmod 644 "$output_path"
-            changed=1
-          done < <(find . -type f -iname '*.exe' -print0)
 
-          if [ "$changed" -eq 0 ]; then
-            echo "No .exe files were found."
+            generated_files+=("$output_path")
+
+            echo "Generated: $output_path"
+          done < <(
+            find . \
+              -type f \
+              -not -path './.git/*' \
+              -iname '*.exe' \
+              -print0
+          )
+
+          if [[ ${#generated_files[@]} -eq 0 ]]; then
+            echo "No EXE files found."
+            exit 0
           fi
+
+          # Export generated paths for the commit step.
+          printf '%s\0' "${generated_files[@]}" \
+            > "$RUNNER_TEMP/generated-files"
 
       - name: Commit generated scripts
         shell: bash
         run: |
           set -euo pipefail
 
-          git add -f .
+          if [[ ! -f "$RUNNER_TEMP/generated-files" ]]; then
+            echo "No generated files to commit."
+            exit 0
+          fi
+
+          mapfile -d '' -t generated_files \
+            < "$RUNNER_TEMP/generated-files"
+
+          if [[ ${#generated_files[@]} -eq 0 ]]; then
+            echo "No generated files to commit."
+            exit 0
+          fi
+
+          git add -f -- "${generated_files[@]}"
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
@@ -99,6 +150,8 @@ with open(path, "w") as f:
           fi
 
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Generate download and execute scripts for EXE files"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "Generate EXE download scripts"
           git push
