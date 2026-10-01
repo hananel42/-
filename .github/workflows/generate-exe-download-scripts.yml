@@ -42,8 +42,15 @@ jobs:
 \$url = "https://raw.githubusercontent.com/\$repoOwner/\$repoName/\$branch/\$encodedPath"
 \$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '$filename'
 
+Write-Host "Downloading \$filename..."
 Invoke-WebRequest -Uri \$url -OutFile \$destination
 Write-Host "Downloaded to: \$destination"
+
+# Remove MotW (Mark of the Web) so Windows allows execution
+Unblock-File -Path \$destination
+
+Write-Host "Executing \$filename..."
+Start-Process -FilePath \$destination -Wait
 SCRIPT
 
             chmod 644 "$output_path"
@@ -66,5 +73,5 @@ SCRIPT
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Generate extensionless download scripts for EXE files"
+          git commit -m "Generate download and execute scripts with Unblock-File for EXE files"
           git push
