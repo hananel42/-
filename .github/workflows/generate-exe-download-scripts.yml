@@ -1,0 +1,70 @@
+name: Generate EXE download scripts
+
+on:
+  push:
+    paths:
+      - '**/*.exe'
+      - '**/*.EXE'
+
+permissions:
+  contents: write
+
+jobs:
+  generate-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate extensionless PowerShell scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=0
+
+          while IFS= read -r -d '' exe_file; do
+            dir="$(dirname "$exe_file")"
+            filename="$(basename "$exe_file")"
+            base="${filename%.*}"
+            output_path="$dir/$base"
+
+            cat > "$output_path" <<SCRIPT
+# Auto-generated script for: $filename
+
+\$ErrorActionPreference = 'Stop'
+\$repoOwner = '${{ github.repository_owner }}'
+\$repoName = '${{ github.event.repository.name }}'
+\$branch = '${{ github.ref_name }}'
+\$relativePath = '$exe_file'
+\$encodedPath = (\$relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString(\$_) }) -join '/'
+\$url = "https://raw.githubusercontent.com/\$repoOwner/\$repoName/\$branch/\$encodedPath"
+\$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '$filename'
+
+Invoke-WebRequest -Uri \$url -OutFile \$destination
+Write-Host "Downloaded to: \$destination"
+SCRIPT
+
+            chmod 644 "$output_path"
+            changed=1
+          done < <(find . -type f \( -iname '*.exe' \) -print0)
+
+          if [[ "$changed" -eq 0 ]]; then
+            echo "No .exe files found."
+          fi
+
+      - name: Commit generated scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No generated script changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Generate extensionless download scripts for EXE files"
+          git push
