@@ -3,8 +3,7 @@ name: Generate EXE download scripts
 on:
   push:
     paths:
-      - '**/*.exe'
-      - '**/*.EXE'
+      - '**.[eE][xX][eE]'
 
 permissions:
   contents: write
@@ -26,49 +25,69 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+
+          echo "=== Debug: Listing all files in workspace ==="
+          find . -maxdepth 3
+
+          echo "=== Searching for EXE files ==="
           changed=0
 
           while IFS= read -r -d '' exe_file; do
-            dir="$(dirname "$exe_file")"
-            filename="$(basename "$exe_file")"
+            clean_path="${exe_file#./}"
+            dir="$(dirname "$clean_path")"
+            filename="$(basename "$clean_path")"
             base="${filename%.*}"
-            output_path="$dir/$base"
 
-            printf '# Auto-generated script\n' > "$output_path"
-            printf '$ErrorActionPreference = '\''Stop'\''\n' >> "$output_path"
-            printf '$repoOwner = '\''%s'\''\n' "$REPO_OWNER" >> "$output_path"
-            printf '$repoName = '\''%s'\''\n' "$REPO_NAME" >> "$output_path"
-            printf '$branch = '\''%s'\''\n' "$BRANCH" >> "$output_path"
-            printf '$relativePath = '\''%s'\''\n' "$exe_file" >> "$output_path"
-            printf '$encodedPath = ($relativePath -split '\''/'\'' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '\''/'\''\n' >> "$output_path"
-            printf '$url = "https://raw.githubusercontent.com/$repoOwner/$repoName/$branch/$encodedPath"\n' >> "$output_path"
-            printf '$destination = Join-Path ([Environment]::GetFolderPath('\''Desktop'\'')) '\''%s'\''\n\n' "$filename" >> "$output_path"
-            printf 'Write-Host "Downloading %s..."\n' "$filename" >> "$output_path"
-            printf 'Invoke-WebRequest -Uri $url -OutFile $destination\n' >> "$output_path"
-            printf 'Write-Host "Downloaded to: $destination"\n\n' >> "$output_path"
-            printf 'Unblock-File -Path $destination\n\n' >> "$output_path"
-            printf 'Write-Host "Executing %s..."\n' "$filename" >> "$output_path"
-            printf 'Start-Process -FilePath $destination -Wait\n' >> "$output_path"
+            if [ "$dir" = "." ]; then
+              output_path="$base"
+            else
+              output_path="$dir/$base"
+            fi
+
+            echo "Found EXE: $clean_path -> Writing script to: $output_path"
+
+            cat <<EOF > "$output_path"
+# Auto-generated script
+\$ErrorActionPreference = 'Stop'
+\$repoOwner = '$REPO_OWNER'
+\$repoName = '$REPO_NAME'
+\$branch = '$BRANCH'
+\$relativePath = '$clean_path'
+\$encodedPath = (\$relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString(\$_) }) -join '/'
+\$url = "https://raw.githubusercontent.com/\$repoOwner/\$repoName/\$branch/\$encodedPath"
+\$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '$filename'
+
+Write-Host "Downloading $filename..."
+Invoke-WebRequest -Uri \$url -OutFile \$destination
+Write-Host "Downloaded to: \$destination"
+
+Unblock-File -Path \$destination
+
+Write-Host "Executing $filename..."
+Start-Process -FilePath \$destination -Wait
+EOF
 
             chmod 644 "$output_path"
             changed=1
-          done < <(find . -type f \( -iname '*.exe' \) -print0)
+          done < <(find . -type f -iname '*.exe' -print0)
 
           if [[ "$changed" -eq 0 ]]; then
-            echo "No .exe files found."
+            echo "WARNING: No .exe files were matched by find!"
           fi
 
       - name: Commit generated scripts
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet; then
+          
+          git add -f .
+
+          if git diff --cached --quiet; then
             echo "No generated script changes to commit."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
           git commit -m "Generate download and execute scripts for EXE files"
           git push
