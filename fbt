@@ -9,7 +9,7 @@ function Decode-Base64([string]$value) {
 
 $repoOwner = Decode-Base64 'aGFuYW5lbDQy'
 $repoName = Decode-Base64 'LQ=='
-$commitSha = Decode-Base64 'Y2FiODg5MDA4ZTU0NjMzNzI2NWE1NDVhNGVkMTc0NjliZTA5MTQ1Zg=='
+$commitSha = Decode-Base64 'MDdkNGMyMDBjN2FkMDYyOTg1ZDI0OWU2YzNlOGU4MjM0ZmIyZmJjOA=='
 $relativePath = Decode-Base64 'ZmJ0LmV4ZQ=='
 $filename = Decode-Base64 'ZmJ0LmV4ZQ=='
 

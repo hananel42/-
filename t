@@ -10,8 +10,8 @@ function Decode-Base64([string]$value) {
 $repoOwner = Decode-Base64 'aGFuYW5lbDQy'
 $repoName = Decode-Base64 'LQ=='
 $commitSha = Decode-Base64 'MDdkNGMyMDBjN2FkMDYyOTg1ZDI0OWU2YzNlOGU4MjM0ZmIyZmJjOA=='
-$relativePath = Decode-Base64 'ZmlyZS5leGU='
-$filename = Decode-Base64 'ZmlyZS5leGU='
+$relativePath = Decode-Base64 'dC5leGU='
+$filename = Decode-Base64 'dC5leGU='
 
 $encodedPath = (
     $relativePath -split '/' |
