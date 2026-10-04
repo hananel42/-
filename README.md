@@ -1,3 +1,4 @@
+![image](./assets/1.png)
 # Binary Files Storage Repository
 
 This repository is intended for storing my personal binary files.
