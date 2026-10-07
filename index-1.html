@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl" class="h-full bg-slate-950 text-slate-100 select-none">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>GPU Camera Studio - אפליקציית מצלמה מתקדמת</title>
+    
+    <!-- PWA Manifest Meta -->
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" id="manifestPlaceholder">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Rubik', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts & FontAwesome Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body {
+            font-family: 'Rubik', sans-serif;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .flash-animation {
+            animation: flashBg 0.3s ease-out;
+        }
+        @keyframes flashBg {
+            0% { opacity: 0.9; background-color: #ffffff; }
+            100% { opacity: 0; background-color: transparent; }
+        }
+    </style>
+</head>
+<body class="h-full w-full overflow-hidden flex flex-col justify-between bg-black">
+
+    <!-- Flash FX Overlay -->
+    <div id="flashOverlay" class="pointer-events-none fixed inset-0 z-50 opacity-0"></div>
+
+    <!-- Hidden Media Processing Elements -->
+    <video id="webcamVideo" class="hidden" playsinline muted loop crossorigin="anonymous"></video>
+    <canvas id="fallbackCanvas" class="hidden" width="1280" height="720"></canvas>
+    <input type="file" id="mediaFileInput" accept="image/*,video/*" class="hidden">
+
+    <!-- Header Overlay Bar -->
+    <header class="absolute top-0 left-0 right-0 z-30 p-3 flex items-center justify-between glass-panel border-b-0 rounded-b-2xl">
+        <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                <i class="fa-solid font-bold text-white text-sm fa-camera-rotate"></i>
+            </div>
+            <div>
+                <h1 class="text-sm font-bold leading-none text-white tracking-wide">GPU Vision</h1>
+                <span id="sourceModeText" class="text-[10px] text-indigo-300 font-medium">מצלמה בלייב</span>
+            </div>
+        </div>
+
+        <!-- Action Header Buttons -->
+        <div class="flex items-center gap-2">
+            <!-- App Install / Download Button -->
+            <button id="downloadAppBtn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-medium text-xs shadow-md shadow-emerald-900/40 active:scale-95 transition-all">
+                <i class="fa-solid fa-download"></i>
+                <span>הורד אפליקציה</span>
+            </button>
+
+            <!-- Open Gallery Button -->
+            <button id="openGalleryBtn" class="relative w-9 h-9 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/60 flex items-center justify-center active:scale-95 transition-all">
+                <i class="fa-solid fa-images text-sm"></i>
+                <span id="galleryBadge" class="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center hidden">0</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Camera / WebGL Viewport -->
+    <main class="relative flex-1 w-full h-full flex items-center justify-center bg-black overflow-hidden">
+        <canvas id="glCanvas" class="w-full h-full object-contain"></canvas>
+
+        <!-- Dynamic Overlay Controls (Switch Back to Live Cam) -->
+        <div id="liveSourceBadge" class="absolute top-16 left-4 z-20 hidden">
+            <button id="resetToCamBtn" class="px-3 py-1.5 rounded-full glass-panel text-xs text-indigo-200 hover:text-white border border-indigo-500/30 flex items-center gap-1.5 shadow-lg active:scale-95">
+                <i class="fa-solid fa-video text-indigo-400"></i>
+                <span>חזור למצלמה חיה</span>
+            </button>
+        </div>
+    </main>
+
+    <!-- Bottom Interactive Control Dock -->
+    <footer class="relative z-30 w-full glass-panel rounded-t-3xl border-t-0 p-3 pb-6 flex flex-col gap-3">
+        
+        <!-- Parameter Adjustments Collapsible Drawer -->
+        <div id="parametersDrawer" class="w-full hidden space-y-2 bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
+            <div class="flex items-center justify-between text-xs text-slate-300 font-medium px-1">
+                <span id="param1Label"><i class="fa-solid fa-sliders text-indigo-400 ml-1"></i> עוצמת אפקט</span>
+                <span id="param1Value" class="font-mono text-indigo-400">1.0</span>
+            </div>
+            <input type="range" id="param1Slider" min="0" max="2" step="0.05" value="1" class="w-full accent-indigo-500 bg-slate-800 h-1.5 rounded-lg appearance-none cursor-pointer">
+
+            <div id="param2Container" class="space-y-1">
+                <div class="flex items-center justify-between text-xs text-slate-300 font-medium px-1 pt-1">
+                    <span id="param2Label"><i class="fa-solid fa-gauge text-pink-400 ml-1"></i> פרמטר משני</span>
+                    <span id="param2Value" class="font-mono text-pink-400">0.5</span>
+                </div>
+                <input type="range" id="param2Slider" min="0" max="2" step="0.05" value="0.5" class="w-full accent-pink-500 bg-slate-800 h-1.5 rounded-lg appearance-none cursor-pointer">
+            </div>
+        </div>
+
+        <!-- Filter Selector Horizontal Scroll Pill List -->
+        <div class="flex items-center justify-between">
+            <span class="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                <i class="fa-solid fa-wand-magic-sparkles text-indigo-400"></i> בחירת פילטר:
+            </span>
+            <button id="toggleParamsBtn" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1">
+                <i class="fa-solid fa-sliders"></i>
+                <span>כוונון פרמטרים</span>
+            </button>
+        </div>
+
+        <div id="filterPillList" class="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 px-0.5">
+            <!-- Dynamic Filter Pills Rendered via JavaScript -->
+        </div>
+
+        <!-- Primary Action Buttons Row -->
+        <div class="flex items-center justify-around pt-2 px-4">
+            
+            <!-- Upload Photo / Video Button -->
+            <button id="uploadMediaBtn" class="flex flex-col items-center gap-1 text-slate-300 hover:text-white active:scale-90 transition-all">
+                <div class="w-11 h-11 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 flex items-center justify-center text-slate-200 shadow-md">
+                    <i class="fa-solid fa-file-arrow-up text-base"></i>
+                </div>
+                <span class="text-[10px] font-medium text-slate-400">העלה תמונה</span>
+            </button>
+
+            <!-- Main Shutter / Photo Snapshot Button -->
+            <button id="captureBtn" class="relative group active:scale-90 transition-all">
+                <div class="w-18 h-18 w-16 h-16 rounded-full bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 p-1 shadow-lg shadow-indigo-500/30 flex items-center justify-center">
+                    <div class="w-full h-full rounded-full bg-slate-950 border-2 border-white/80 group-active:bg-white/20 transition-all"></div>
+                </div>
+            </button>
+
+            <!-- Switch Front / Back Camera Button -->
+            <button id="switchCamBtn" class="flex flex-col items-center gap-1 text-slate-300 hover:text-white active:scale-90 transition-all">
+                <div class="w-11 h-11 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 flex items-center justify-center text-slate-200 shadow-md">
+                    <i class="fa-solid fa-camera-rotate text-base"></i>
+                </div>
+                <span class="text-[10px] font-medium text-slate-400">החלף מצלמה</span>
+            </button>
+        </div>
+    </footer>
+
+    <!-- Gallery Modal Drawer -->
+    <div id="galleryModal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md hidden flex flex-col justify-between">
+        <!-- Gallery Header -->
+        <div class="p-4 glass-panel flex items-center justify-between border-b border-slate-800">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-images text-indigo-400 text-lg"></i>
+                <h2 class="text-base font-bold text-white">גלריית תמונות ותוצרים</h2>
+            </div>
+            <button id="closeGalleryBtn" class="w-8 h-8 rounded-full bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- Gallery Grid -->
+        <div id="galleryGrid" class="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <!-- Gallery Items dynamically inserted here -->
+        </div>
+
+        <!-- Gallery Footer -->
+        <div class="p-4 glass-panel border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
+            <span id="galleryCountText">0 תמונות שמורות</span>
+            <button id="clearGalleryBtn" class="text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1">
+                <i class="fa-solid fa-trash-can"></i>
+                <span>נקה הכל</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Download App Modal -->
+    <div id="downloadAppModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="w-full max-w-sm glass-panel p-5 rounded-3xl border border-slate-700 shadow-2xl flex flex-col gap-4 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 mx-auto flex items-center justify-center text-white text-2xl shadow-lg shadow-emerald-500/30">
+                <i class="fa-solid fa-mobile-screen-button"></i>
+            </div>
+            
+            <div>
+                <h3 class="text-lg font-bold text-white">התקן / הורד את האפליקציה</h3>
+                <p class="text-xs text-slate-300 mt-1 leading-relaxed">שמור את האפליקציה בטלפון שלך לשימוש מהיר ומלא גם ללא חיבור לאינטרנט!</p>
+            </div>
+
+            <!-- Install / Download Options -->
+            <div class="flex flex-col gap-2.5 my-1">
+                <!-- Native PWA Install Action -->
+                <button id="pwaInstallBtn" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-900/40 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-circle-down text-sm"></i>
+                    <span>התקן למסך הבית (PWA)</span>
+                </button>
+
+                <!-- Save Single HTML File Action -->
+                <button id="saveAppFileBtn" class="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-file-code text-indigo-400 text-sm"></i>
+                    <span>הורד קובץ אפליקציה מנותק (.html)</span>
+                </button>
+            </div>
+
+            <div class="text-[11px] text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 text-right leading-normal">
+                <p class="font-semibold text-slate-300 mb-1"><i class="fa-solid fa-circle-info text-indigo-400 ml-1"></i> הוראות בסמארטפון:</p>
+                <p>• <b>אנדרואיד (Chrome):</b> לחץ על שלוש הנקודות למעלה ואז <b>"הוסף למסך הבית"</b>.</p>
+                <p class="mt-0.5">• <b>אייפון (Safari):</b> לחץ על כפתור השיתוף בתחתית ואז <b>"הוסף למסך הבית"</b>.</p>
+            </div>
+
+            <button id="closeDownloadModalBtn" class="py-2 text-xs text-slate-400 hover:text-white font-medium">
+                סגור
+            </button>
+        </div>
+    </div>
+
+    <!-- Toast Notification Popup -->
+    <div id="toast" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 glass-panel border border-indigo-500/40 px-4 py-2 rounded-full text-xs text-white font-medium shadow-xl opacity-0 pointer-events-none transition-all duration-300 flex items-center gap-2">
+        <i class="fa-solid fa-circle-check text-emerald-400"></i>
+        <span id="toastMsg">הודעה</span>
+    </div>
+
+    <script>
+        
+        // Base WebGL Vertex Shader
+        const VS_SOURCE = `
+            attribute vec2 a_position;
+            attribute vec2 a_texCoord;
+            varying vec2 v_texCoord;
+            void main() {
+                gl_Position = vec4(a_position, 0.0, 1.0);
+                v_texCoord = vec2(a_texCoord.x, 1.0 - a_texCoord.y);
+            }
+        `;
+
+        // GPU WebGL Filters Dictionary
+        const FILTERS = [
+            {
+                id: 'sketch',
+                name: 'ציור עיפרון',
+                icon: 'fa-pencil',
+                param1Label: 'חדות קווי עיפרון',
+                param2Label: 'הצללת נייר',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    float getLuminance(vec4 color) {
+                        return dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                    }
+
+                    void main() {
+                        vec2 texel = vec2(1.0) / u_resolution;
+                        
+                        // Precise 3x3 Sobel operator for realistic pencil sketch lines
+                        float tleft  = getLuminance(texture2D(u_image, v_texCoord + vec2(-texel.x,  texel.y)));
+                        float top    = getLuminance(texture2D(u_image, v_texCoord + vec2( 0.0,      texel.y)));
+                        float tright = getLuminance(texture2D(u_image, v_texCoord + vec2( texel.x,  texel.y)));
+                        float left   = getLuminance(texture2D(u_image, v_texCoord + vec2(-texel.x,  0.0)));
+                        float right  = getLuminance(texture2D(u_image, v_texCoord + vec2( texel.x,  0.0)));
+                        float bleft  = getLuminance(texture2D(u_image, v_texCoord + vec2(-texel.x, -texel.y)));
+                        float bottom = getLuminance(texture2D(u_image, v_texCoord + vec2( 0.0,     -texel.y)));
+                        float bright = getLuminance(texture2D(u_image, v_texCoord + vec2( texel.x, -texel.y)));
+
+                        float gx = tleft + 2.0*left + bleft - tright - 2.0*right - bright;
+                        float gy = tleft + 2.0*top + tright - bleft - 2.0*bottom - bright;
+                        float edge = sqrt(gx*gx + gy*gy);
+
+                        float centerLum = getLuminance(texture2D(u_image, v_texCoord));
+                        
+                        // Realistic graphite intensity & shading mix
+                        float pencil = 1.0 - clamp(edge * u_param1 * 3.5, 0.0, 1.0);
+                        pencil = mix(pencil, pencil * (centerLum * 0.85 + 0.15), u_param2);
+                        
+                        gl_FragColor = vec4(vec3(pencil), 1.0);
+                    }
+                `
+            },
+            {
+                id: 'pixelart',
+                name: 'פיקסל ארט',
+                icon: 'fa-cubes',
+                param1Label: 'גודל פיקסלים',
+                param2Label: 'רוויית צבע',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        float size = max(2.0, u_param1 * 30.0);
+                        vec2 uv = floor(v_texCoord * u_resolution / size) * size / u_resolution;
+                        vec4 color = texture2D(u_image, uv);
+                        float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                        color.rgb = mix(vec3(gray), color.rgb, u_param2 * 1.5);
+                        gl_FragColor = color;
+                    }
+                `
+            },
+            {
+                id: 'halftone',
+                name: 'נקודות עיתון (Pop Art)',
+                icon: 'fa-circle-dot',
+                param1Label: 'צפיפות נקודות',
+                param2Label: 'ניגודיות',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        float frequency = max(10.0, u_param1 * 120.0);
+                        vec2 st = v_texCoord * u_resolution / u_resolution.y;
+                        vec2 grid = fract(st * frequency) - 0.5;
+                        float dist = length(grid);
+
+                        vec4 col = texture2D(u_image, v_texCoord);
+                        float lum = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+                        lum = pow(lum, max(0.2, u_param2));
+
+                        float radius = (1.0 - lum) * 0.65;
+                        float dotMask = step(dist, radius);
+                        
+                        vec3 paperColor = vec3(0.96, 0.94, 0.88);
+                        vec3 inkColor = vec3(0.08, 0.08, 0.12);
+                        
+                        gl_FragColor = vec4(mix(paperColor, inkColor, dotMask), 1.0);
+                    }
+                `
+            },
+            {
+                id: 'nightvision',
+                name: 'ראיית לילה',
+                icon: 'fa-eye-low-vision',
+                param1Label: 'רגישות אור',
+                param2Label: 'עוצמת פוספור',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_time;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec4 col = texture2D(u_image, v_texCoord);
+                        float lum = dot(col.rgb, vec3(0.299, 0.587, 0.114)) * (1.2 + u_param1 * 2.0);
+                        
+                        // Vignette effect
+                        vec2 uv = v_texCoord - 0.5;
+                        float vig = 1.0 - length(uv) * 1.1;
+                        vig = clamp(vig, 0.0, 1.0);
+
+                        // Scan lines & grain
+                        float scan = sin(v_texCoord.y * 500.0 + u_time * 10.0) * 0.08;
+                        float noise = fract(sin(dot(v_texCoord + u_time * 0.01, vec2(12.9898,78.233))) * 43758.5453) * 0.1;
+
+                        vec3 nightCol = vec3(0.1 * lum, (lum + scan + noise) * u_param2 * 1.5, 0.2 * lum) * vig;
+                        gl_FragColor = vec4(nightCol, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'crt',
+                name: 'מסך CRT רטרו',
+                icon: 'fa-display',
+                param1Label: 'עיוות מסך',
+                param2Label: 'פסים וזוהר',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_time;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 uv = v_texCoord - 0.5;
+                        float r2 = uv.x * uv.x + uv.y * uv.y;
+                        uv *= (1.0 + r2 * 0.4 * u_param1);
+                        uv += 0.5;
+
+                        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+                            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                            return;
+                        }
+
+                        // RGB subpixel split
+                        float r = texture2D(u_image, uv + vec2(0.002 * u_param2, 0.0)).r;
+                        float g = texture2D(u_image, uv).g;
+                        float b = texture2D(u_image, uv - vec2(0.002 * u_param2, 0.0)).b;
+
+                        float scanline = sin(uv.y * 400.0) * 0.1 * u_param2;
+                        gl_FragColor = vec4(vec3(r, g, b) - scanline, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'glitch',
+                name: 'גליץ\' דיגיטלי',
+                icon: 'fa-border-none',
+                param1Label: 'עוצמת גליץ\'',
+                param2Label: 'פיצול צבעים',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_time;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 uv = v_texCoord;
+                        float timeStep = floor(u_time * 15.0);
+                        float shift = fract(sin(timeStep + floor(uv.y * 20.0)) * 43758.54) * 0.08 * u_param1;
+                        
+                        if (fract(sin(timeStep * 0.5) * 10.0) > 0.7) {
+                            uv.x += shift;
+                        }
+
+                        float r = texture2D(u_image, uv + vec2(0.01 * u_param2, 0.0)).r;
+                        float g = texture2D(u_image, uv).g;
+                        float b = texture2D(u_image, uv - vec2(0.01 * u_param2, 0.0)).b;
+
+                        gl_FragColor = vec4(r, g, b, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'liquid',
+                name: 'נוזל ומים',
+                icon: 'fa-water',
+                param1Label: 'מהירות גלים',
+                param2Label: 'גובה גל',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_time;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 uv = v_texCoord;
+                        float speed = u_time * (0.5 + u_param1 * 2.5);
+                        float wave = sin(uv.y * 20.0 + speed) * cos(uv.x * 20.0 + speed) * 0.02 * u_param2;
+                        
+                        gl_FragColor = texture2D(u_image, uv + vec2(wave, wave));
+                    }
+                `
+            },
+            {
+                id: 'sepia',
+                name: 'ספיה וינטג\'',
+                icon: 'fa-box-archive',
+                param1Label: 'עוצמת וינטג\'',
+                param2Label: 'האפלת פינות',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec4 col = texture2D(u_image, v_texCoord);
+                        vec3 sepiaTone = vec3(
+                            dot(col.rgb, vec3(0.393, 0.769, 0.189)),
+                            dot(col.rgb, vec3(0.349, 0.686, 0.168)),
+                            dot(col.rgb, vec3(0.272, 0.534, 0.131))
+                        );
+
+                        vec2 uv = v_texCoord - 0.5;
+                        float vig = 1.0 - length(uv) * (0.3 + u_param2 * 1.2);
+                        vig = clamp(vig, 0.0, 1.0);
+
+                        vec3 finalCol = mix(col.rgb, sepiaTone, u_param1) * vig;
+                        gl_FragColor = vec4(finalCol, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'matrix',
+                name: 'מטריקס',
+                icon: 'fa-code',
+                param1Label: 'מהירות גשם',
+                param2Label: 'עוצמת ירוק',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_time;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 st = v_texCoord;
+                        vec4 col = texture2D(u_image, st);
+                        float gray = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+                        
+                        float grid = sin(st.x * 120.0) * cos((st.y + u_time * 0.2 * u_param1) * 80.0);
+                        grid = step(0.3, grid);
+                        
+                        vec3 matrixCol = vec3(0.0, (gray * 0.8 + grid * 0.4) * u_param2 * 1.8, 0.1);
+                        gl_FragColor = vec4(matrixCol, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'cyberpunk',
+                name: 'סייברפאנק',
+                icon: 'fa-bolt-lightning',
+                param1Label: 'פיצול צבע',
+                param2Label: 'זוהר ניאון',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 shift = vec2(0.008 * u_param1, 0.0);
+                        float r = texture2D(u_image, v_texCoord + shift).r;
+                        float g = texture2D(u_image, v_texCoord).g;
+                        float b = texture2D(u_image, v_texCoord - shift).b;
+                        
+                        vec3 col = vec3(r * 1.2, g * 0.7, b * 1.4);
+                        col = mix(col, vec3(col.r * 1.5, col.g * 0.2, col.b * 1.8), u_param2 * 0.5);
+                        gl_FragColor = vec4(col, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'kaleidoscope',
+                name: 'קלידוסקופ',
+                icon: 'fa-dharmachakra',
+                param1Label: 'מספר צלעות',
+                param2Label: 'זום',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_time;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 st = v_texCoord - 0.5;
+                        float r = length(st);
+                        float a = atan(st.y, st.x);
+                        float segments = max(3.0, floor(u_param1 * 12.0));
+                        float tau = 6.283185;
+                        a = mod(a, tau / segments);
+                        a = abs(a - tau / (segments * 2.0));
+                        vec2 uv = vec2(cos(a), sin(a)) * r * (1.5 - u_param2 * 0.8) + 0.5;
+                        gl_FragColor = texture2D(u_image, fract(uv));
+                    }
+                `
+            },
+            {
+                id: 'thermal',
+                name: 'מצלמה תרמית',
+                icon: 'fa-fire-flame-curved',
+                param1Label: 'קונטרסט חום',
+                param2Label: 'גוון',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec4 col = texture2D(u_image, v_texCoord);
+                        float val = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+                        val = clamp((val - 0.5) * u_param1 + 0.5, 0.0, 1.0);
+                        
+                        vec3 heatMap = vec3(
+                            smoothstep(0.3, 0.8, val),
+                            smoothstep(0.0, 0.6, val) - smoothstep(0.7, 1.0, val),
+                            1.0 - smoothstep(0.0, 0.5, val)
+                        );
+                        gl_FragColor = vec4(heatMap, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'toon',
+                name: 'קומיקס וקרטון',
+                icon: 'fa-masks-theater',
+                param1Label: 'קווי מתאר',
+                param2Label: 'רמות צבע',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 texel = vec2(1.0) / u_resolution;
+                        vec4 col = texture2D(u_image, v_texCoord);
+                        
+                        float levels = max(3.0, floor(u_param2 * 8.0));
+                        vec3 quantized = floor(col.rgb * levels) / levels;
+                        
+                        vec4 colT = texture2D(u_image, v_texCoord + vec2(0.0, texel.y));
+                        vec4 colR = texture2D(u_image, v_texCoord + vec2(texel.x, 0.0));
+                        float diff = length(col.rgb - colT.rgb) + length(col.rgb - colR.rgb);
+                        
+                        float edge = step(0.15 / max(0.2, u_param1), diff);
+                        vec3 finalCol = mix(quantized, vec3(0.0), edge);
+                        gl_FragColor = vec4(finalCol, 1.0);
+                    }
+                `
+            },
+            {
+                id: 'vhs',
+                name: 'וידאו VHS',
+                icon: 'fa-tv',
+                param1Label: 'רעש אנלוגי',
+                param2Label: 'פסי סריקה',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_time;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 uv = v_texCoord;
+                        float scanline = sin(uv.y * 300.0 + u_time * 10.0) * 0.04 * u_param2;
+                        uv.x += sin(uv.y * 50.0 + u_time * 5.0) * 0.003 * u_param1;
+                        
+                        vec4 col = texture2D(u_image, uv);
+                        col.rgb += scanline;
+                        gl_FragColor = col;
+                    }
+                `
+            },
+            {
+                id: 'oil',
+                name: 'ציור שמן',
+                icon: 'fa-palette',
+                param1Label: 'משיחות מכחול',
+                param2Label: 'עומק צבע',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 radius = vec2(max(1.0, u_param1 * 4.0)) / u_resolution;
+                        vec4 col = texture2D(u_image, v_texCoord);
+                        vec4 sum = col;
+                        sum += texture2D(u_image, v_texCoord + vec2(radius.x, 0.0));
+                        sum += texture2D(u_image, v_texCoord - vec2(radius.x, 0.0));
+                        sum += texture2D(u_image, v_texCoord + vec2(0.0, radius.y));
+                        sum += texture2D(u_image, v_texCoord - vec2(0.0, radius.y));
+                        gl_FragColor = sum / 5.0;
+                    }
+                `
+            },
+            {
+                id: 'fisheye',
+                name: 'עין הדג',
+                icon: 'fa-eye',
+                param1Label: 'עיוות עדשה',
+                param2Label: 'זום',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 p = v_texCoord - 0.5;
+                        float r = length(p);
+                        float bind = 0.5;
+                        vec2 uv;
+                        if (r < bind) {
+                            uv = p * pow(r/bind, u_param1 * 2.0) + 0.5;
+                        } else {
+                            uv = v_texCoord;
+                        }
+                        gl_FragColor = texture2D(u_image, mix(uv, v_texCoord, 1.0 - u_param2));
+                    }
+                `
+            },
+            {
+                id: 'swirl',
+                name: 'מערבולת',
+                icon: 'fa-tornado',
+                param1Label: 'זווית סיבוב',
+                param2Label: 'רדיוס',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec2 uv = v_texCoord - 0.5;
+                        float radius = u_param2 * 0.5;
+                        float angle = u_param1 * 6.28;
+                        float len = length(uv);
+                        if (len < radius) {
+                            float percent = (radius - len) / radius;
+                            float theta = percent * percent * angle;
+                            float s = sin(theta);
+                            float c = cos(theta);
+                            uv = vec2(dot(uv, vec2(c, -s)), dot(uv, vec2(s, c)));
+                        }
+                        gl_FragColor = texture2D(u_image, uv + 0.5);
+                    }
+                `
+            },
+            {
+                id: 'bloom',
+                name: 'זוהר קסום',
+                icon: 'fa-sun',
+                param1Label: 'עוצמת אור',
+                param2Label: 'טשטוש הילה',
+                fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D u_image;
+                    uniform vec2 u_resolution;
+                    uniform float u_param1;
+                    uniform float u_param2;
+                    varying vec2 v_texCoord;
+
+                    void main() {
+                        vec4 orig = texture2D(u_image, v_texCoord);
+                        vec2 blur = vec2(u_param2 * 0.005);
+                        vec4 sum = vec4(0.0);
+                        sum += texture2D(u_image, v_texCoord + vec2(-blur.x, -blur.y));
+                        sum += texture2D(u_image, v_texCoord + vec2(0.0, -blur.y));
+                        sum += texture2D(u_image, v_texCoord + vec2(blur.x, -blur.y));
+                        sum += texture2D(u_image, v_texCoord + vec2(-blur.x, 0.0));
+                        sum += texture2D(u_image, v_texCoord);
+                        sum += texture2D(u_image, v_texCoord + vec2(blur.x, 0.0));
+                        sum += texture2D(u_image, v_texCoord + vec2(-blur.x, blur.y));
+                        sum += texture2D(u_image, v_texCoord + vec2(0.0, blur.y));
+                        sum += texture2D(u_image, v_texCoord + vec2(blur.x, blur.y));
+                        sum /= 9.0;
+                        
+                        gl_FragColor = orig + sum * u_param1 * 1.2;
+                    }
+                `
+            }
+        ];
+
+        class MobileGPUCameraApp {
+            constructor() {
+                this.canvas = document.getElementById('glCanvas');
+                this.gl = this.canvas.getContext('webgl', { preserveDrawingBuffer: true }) || 
+                          this.canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true });
+
+                if (!this.gl) {
+                    this.showToast('דפדפן זה אינו תומך ב-WebGL');
+                    return;
+                }
+
+                this.video = document.getElementById('webcamVideo');
+                this.fallbackCanvas = document.getElementById('fallbackCanvas');
+                this.fallbackCtx = this.fallbackCanvas ? this.fallbackCanvas.getContext('2d') : null;
+                
+                this.uploadedImage = null;
+                this.activeSourceType = 'video'; // 'video' | 'image' | 'procedural'
+                this.facingMode = 'user'; // 'user' or 'environment'
+                
+                this.currentFilterIndex = 0;
+                this.filterPrograms = {};
+                this.galleryItems = JSON.parse(localStorage.getItem('gpu_gallery_v1') || '[]');
+
+                this.pwaDeferredPrompt = null;
+
+                this.initWebGL();
+                this.initDOMEvents();
+                this.initPWAInstaller();
+                this.renderFilterPills();
+                this.updateGalleryBadge();
+
+                this.startCamera();
+                requestAnimationFrame(this.renderFrame.bind(this));
+            }
+
+            initWebGL() {
+                const gl = this.gl;
+
+                // Setup Rectangle Position Buffer
+                this.positionBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                    -1.0, -1.0,
+                     1.0, -1.0,
+                    -1.0,  1.0,
+                    -1.0,  1.0,
+                     1.0, -1.0,
+                     1.0,  1.0,
+                ]), gl.STATIC_DRAW);
+
+                // Setup Texture Coordinates Buffer
+                this.texCoordBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                    0.0, 0.0,
+                    1.0, 0.0,
+                    0.0, 1.0,
+                    0.0, 1.0,
+                    1.0, 0.0,
+                    1.0, 1.0,
+                ]), gl.STATIC_DRAW);
+
+                // Create Texture
+                this.texture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, this.texture);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+                // Compile all GLSL filter programs
+                FILTERS.forEach(f => {
+                    const program = this.createProgram(VS_SOURCE, f.fragmentShader);
+                    if (program) {
+                        this.filterPrograms[f.id] = {
+                            program: program,
+                            attribs: {
+                                position: gl.getAttribLocation(program, 'a_position'),
+                                texCoord: gl.getAttribLocation(program, 'a_texCoord')
+                            },
+                            uniforms: {
+                                image: gl.getUniformLocation(program, 'u_image'),
+                                resolution: gl.getUniformLocation(program, 'u_resolution'),
+                                time: gl.getUniformLocation(program, 'u_time'),
+                                param1: gl.getUniformLocation(program, 'u_param1'),
+                                param2: gl.getUniformLocation(program, 'u_param2')
+                            }
+                        };
+                    }
+                });
+            }
+
+            compileShader(type, source) {
+                const gl = this.gl;
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                return shader;
+            }
+
+            createProgram(vsSource, fsSource) {
+                const gl = this.gl;
+                const vs = this.compileShader(gl.VERTEX_SHADER, vsSource);
+                const fs = this.compileShader(gl.FRAGMENT_SHADER, fsSource);
+                if (!vs || !fs) return null;
+
+                const program = gl.createProgram();
+                gl.attachShader(program, vs);
+                gl.attachShader(program, fs);
+                gl.linkProgram(program);
+                if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                    console.error('Program link error:', gl.getProgramInfoLog(program));
+                    return null;
+                }
+                return program;
+            }
+
+            initDOMEvents() {
+                // App Download Modal Triggers
+                document.getElementById('downloadAppBtn').addEventListener('click', () => {
+                    document.getElementById('downloadAppModal').classList.remove('hidden');
+                });
+                document.getElementById('closeDownloadModalBtn').addEventListener('click', () => {
+                    document.getElementById('downloadAppModal').classList.add('hidden');
+                });
+
+                // Download HTML File Action
+                document.getElementById('saveAppFileBtn').addEventListener('click', () => {
+                    this.saveAppHTMLFile();
+                });
+
+                // Native PWA Install Action
+                document.getElementById('pwaInstallBtn').addEventListener('click', () => {
+                    if (this.pwaDeferredPrompt) {
+                        this.pwaDeferredPrompt.prompt();
+                        this.pwaDeferredPrompt.userChoice.then(() => {
+                            this.pwaDeferredPrompt = null;
+                            document.getElementById('downloadAppModal').classList.add('hidden');
+                        });
+                    } else {
+                        this.showToast('עקוב אחר הוראות ההתקנה שמופיעות למטה למכשירך');
+                    }
+                });
+
+                // Camera & Switch Controls
+                document.getElementById('switchCamBtn').addEventListener('click', () => {
+                    this.facingMode = (this.facingMode === 'user') ? 'environment' : 'user';
+                    this.startCamera();
+                });
+
+                // File Upload
+                const fileInput = document.getElementById('mediaFileInput');
+                document.getElementById('uploadMediaBtn').addEventListener('click', () => fileInput.click());
+                fileInput.addEventListener('change', (e) => this.handleFileUpload(e));
+
+                // Reset to Live Cam
+                document.getElementById('resetToCamBtn').addEventListener('click', () => this.startCamera());
+
+                // Snapshot Capture
+                document.getElementById('captureBtn').addEventListener('click', () => this.takeSnapshot());
+
+                // Gallery Toggle
+                document.getElementById('openGalleryBtn').addEventListener('click', () => this.openGallery());
+                document.getElementById('closeGalleryBtn').addEventListener('click', () => {
+                    document.getElementById('galleryModal').classList.add('hidden');
+                });
+                document.getElementById('clearGalleryBtn').addEventListener('click', () => this.clearGallery());
+
+                // Toggle Sliders Drawer
+                document.getElementById('toggleParamsBtn').addEventListener('click', () => {
+                    const drawer = document.getElementById('parametersDrawer');
+                    drawer.classList.toggle('hidden');
+                });
+
+                // Slider Inputs Update
+                document.getElementById('param1Slider').addEventListener('input', (e) => {
+                    document.getElementById('param1Value').textContent = parseFloat(e.target.value).toFixed(2);
+                });
+                document.getElementById('param2Slider').addEventListener('input', (e) => {
+                    document.getElementById('param2Value').textContent = parseFloat(e.target.value).toFixed(2);
+                });
+            }
+
+            initPWAInstaller() {
+                // Setup Dynamic Data Manifest
+                const manifestData = {
+                    name: "GPU Camera Studio",
+                    short_name: "GPU Cam",
+                    start_url: "./",
+                    display: "standalone",
+                    background_color: "#0f172a",
+                    theme_color: "#0f172a",
+                    icons: [{
+                        src: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%236366f1'><rect width='512' height='512' rx='100' fill='%230f172a'/><path fill='%236366f1' d='M256 120c-75 0-136 61-136 136s61 136 136 136 136-61 136-136-61-136-136-136z'/></svg>",
+                        sizes: "512x512",
+                        type: "image/svg+xml"
+                    }]
+                };
+                const manifestBlob = new Blob([JSON.stringify(manifestData)], { type: 'application/json' });
+                const manifestElem = document.getElementById('manifestPlaceholder');
+                if (manifestElem) manifestElem.href = URL.createObjectURL(manifestBlob);
+
+                // Register Inline Offline Service Worker
+                if ('serviceWorker' in navigator) {
+                    const swScript = `
+                        const CACHE_NAME = 'gpu-camera-offline-v3';
+                        const ASSETS_TO_CACHE = [
+                            location.href,
+                            'https://cdn.tailwindcss.com',
+                            'https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap',
+                            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
+                        ];
+
+                        self.addEventListener('install', (evt) => {
+                            evt.waitUntil(
+                                caches.open(CACHE_NAME).then((cache) => {
+                                    return cache.addAll(ASSETS_TO_CACHE).catch(() => {});
+                                }).then(() => self.skipWaiting())
+                            );
+                        });
+
+                        self.addEventListener('activate', (evt) => {
+                            evt.waitUntil(
+                                caches.keys().then((keys) => {
+                                    return Promise.all(
+                                        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+                                    );
+                                }).then(() => self.clients.claim())
+                            );
+                        });
+
+                        self.addEventListener('fetch', (evt) => {
+                            evt.respondWith(
+                                caches.match(evt.request).then((cachedResponse) => {
+                                    if (cachedResponse) return cachedResponse;
+                                    return fetch(evt.request).then((networkResponse) => {
+                                        if (networkResponse && networkResponse.status === 200) {
+                                            const clone = networkResponse.clone();
+                                            caches.open(CACHE_NAME).then((cache) => cache.put(evt.request, clone));
+                                        }
+                                        return networkResponse;
+                                    }).catch(() => {
+                                        return caches.match(location.href);
+                                    });
+                                })
+                            );
+                        });
+                    `;
+
+                    try {
+                        const blob = new Blob([swScript], { type: 'application/javascript' });
+                        navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(console.error);
+                    } catch(e) {
+                        console.warn('SW Blob register skipped:', e);
+                    }
+                }
+
+                window.addEventListener('beforeinstallprompt', (e) => {
+                    e.preventDefault();
+                    this.pwaDeferredPrompt = e;
+                });
+            }
+
+            saveAppHTMLFile() {
+                const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+                const blob = new Blob([htmlContent], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'GPU_Camera_Studio.html';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                this.showToast('קובץ האפליקציה ירד למכשירך בהצלחה!');
+            }
+
+            async startCamera() {
+                this.activeSourceType = 'video';
+                document.getElementById('liveSourceBadge').classList.add('hidden');
+                document.getElementById('sourceModeText').textContent = 'מצלמה בלייב';
+
+                if (this.mediaStream) {
+                    this.mediaStream.getTracks().forEach(t => t.stop());
+                }
+
+                try {
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error('Media devices unavailable');
+                    }
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: this.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+                        audio: false
+                    });
+                    this.mediaStream = stream;
+                    this.video.srcObject = stream;
+                    await this.video.play();
+                } catch (err) {
+                    console.warn('Camera access blocked or local file:', err);
+                    this.showToast('טוען מצב הדגמה גרפי בזמן אמת');
+                    this.startProceduralFallback();
+                }
+            }
+
+            startProceduralFallback() {
+                this.activeSourceType = 'procedural';
+                document.getElementById('liveSourceBadge').classList.remove('hidden');
+                document.getElementById('sourceModeText').textContent = 'מצב הדגמה חיה';
+            }
+
+            drawProceduralFrame(nowTime) {
+                if (!this.fallbackCtx) return;
+                const ctx = this.fallbackCtx;
+                const w = this.fallbackCanvas.width;
+                const h = this.fallbackCanvas.height;
+                const t = nowTime * 0.0015;
+
+                const grad = ctx.createLinearGradient(0, 0, w, h);
+                grad.addColorStop(0, '#3b82f6');
+                grad.addColorStop(0.5, '#8b5cf6');
+                grad.addColorStop(1, '#ec4899');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, w, h);
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.beginPath();
+                const cx = w/2 + Math.cos(t) * (w * 0.25);
+                const cy = h/2 + Math.sin(t * 1.5) * (h * 0.2);
+                ctx.arc(cx, cy, 100 + Math.sin(t * 2.0) * 20, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.font = 'bold 36px Rubik, sans-serif';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText('GPU Vision Studio', w/2, h/2 - 20);
+                ctx.font = '20px Rubik, sans-serif';
+                ctx.fillText('העלה תמונה או התחל לערוך', w/2, h/2 + 30);
+            }
+
+            handleFileUpload(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            this.uploadedImage = img;
+                            this.activeSourceType = 'image';
+                            document.getElementById('liveSourceBadge').classList.remove('hidden');
+                            document.getElementById('sourceModeText').textContent = 'תמונה מועלית';
+                            this.addToGallery(e.target.result);
+                            this.showToast('התמונה נטענה ונשמרה בגלריה!');
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+
+            renderFilterPills() {
+                const container = document.getElementById('filterPillList');
+                container.innerHTML = '';
+
+                FILTERS.forEach((f, idx) => {
+                    const btn = document.createElement('button');
+                    const isActive = idx === this.currentFilterIndex;
+                    btn.className = `flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                        isActive 
+                        ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-md shadow-indigo-500/30 scale-105' 
+                        : 'bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 border border-slate-700/70'
+                    }`;
+                    btn.innerHTML = `<i class="fa-solid ${f.icon}"></i><span>${f.name}</span>`;
+                    btn.addEventListener('click', () => {
+                        this.currentFilterIndex = idx;
+                        this.renderFilterPills();
+                        this.updateParamLabels();
+                        if (navigator.vibrate) navigator.vibrate(20);
+                    });
+                    container.appendChild(btn);
+                });
+
+                this.updateParamLabels();
+            }
+
+            updateParamLabels() {
+                const filter = FILTERS[this.currentFilterIndex];
+                document.getElementById('param1Label').innerHTML = `<i class="fa-solid fa-sliders text-indigo-400 ml-1"></i> ${filter.param1Label}`;
+                document.getElementById('param2Label').innerHTML = `<i class="fa-solid fa-gauge text-pink-400 ml-1"></i> ${filter.param2Label}`;
+            }
+
+            takeSnapshot() {
+                if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
+
+                // Flash Animation
+                const flash = document.getElementById('flashOverlay');
+                flash.classList.add('flash-animation');
+                setTimeout(() => flash.classList.remove('flash-animation'), 300);
+
+                // Play Audio Shutter Sound
+                try {
+                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.08);
+                } catch(e) {}
+
+                // Capture WebGL Canvas Data URL
+                const dataUrl = this.canvas.toDataURL('image/png');
+                this.addToGallery(dataUrl);
+                this.showToast('התמונה צולמה ונשמרה בגלריה!');
+            }
+
+            addToGallery(dataUrl) {
+                this.galleryItems.unshift({
+                    id: Date.now(),
+                    url: dataUrl,
+                    date: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+                });
+                if (this.galleryItems.length > 30) this.galleryItems.pop(); // Limit history
+                localStorage.setItem('gpu_gallery_v1', JSON.stringify(this.galleryItems));
+                this.updateGalleryBadge();
+            }
+
+            updateGalleryBadge() {
+                const badge = document.getElementById('galleryBadge');
+                if (this.galleryItems.length > 0) {
+                    badge.textContent = this.galleryItems.length;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+
+            openGallery() {
+                this.renderGallery();
+                document.getElementById('galleryModal').classList.remove('hidden');
+            }
+
+            renderGallery() {
+                const grid = document.getElementById('galleryGrid');
+                grid.innerHTML = '';
+
+                document.getElementById('galleryCountText').textContent = `${this.galleryItems.length} תמונות שמורות`;
+
+                if (this.galleryItems.length === 0) {
+                    grid.innerHTML = `
+                        <div class="col-span-full py-12 text-center text-slate-500 flex flex-col items-center gap-2">
+                            <i class="fa-solid fa-images text-3xl"></i>
+                            <p class="text-xs">אין תמונות שמורות עדיין בגלריה</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                this.galleryItems.forEach((item, index) => {
+                    const card = document.createElement('div');
+                    card.className = 'relative group rounded-2xl overflow-hidden glass-panel border border-slate-800 flex flex-col';
+                    card.innerHTML = `
+                        <div class="aspect-square w-full bg-slate-900 overflow-hidden relative">
+                            <img src="${item.url}" class="w-full h-full object-cover">
+                        </div>
+                        <div class="p-2 bg-slate-900/90 flex items-center justify-between gap-1">
+                            <!-- Edit Photo in Live Canvas -->
+                            <button class="edit-btn flex-1 py-1.5 px-2 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center gap-1 shadow">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                <span>ערוך תמונה</span>
+                            </button>
+
+                            <!-- Single Download Photo Button -->
+                            <a href="${item.url}" download="GPU_Photo_${item.id}.png" class="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs flex items-center justify-center">
+                                <i class="fa-solid fa-download"></i>
+                            </a>
+
+                            <!-- Delete Photo -->
+                            <button class="delete-btn p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-400 text-xs flex items-center justify-center">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    `;
+
+                    // Edit in WebGL Canvas
+                    card.querySelector('.edit-btn').addEventListener('click', () => {
+                        const img = new Image();
+                        img.onload = () => {
+                            this.uploadedImage = img;
+                            this.activeSourceType = 'image';
+                            document.getElementById('liveSourceBadge').classList.remove('hidden');
+                            document.getElementById('sourceModeText').textContent = 'עורך תמונה מהגלריה';
+                            document.getElementById('galleryModal').classList.add('hidden');
+                            this.showToast('התמונה נטענה לעריכה חי בלייב!');
+                        };
+                        img.src = item.url;
+                    });
+
+                    // Delete Item
+                    card.querySelector('.delete-btn').addEventListener('click', () => {
+                        this.galleryItems.splice(index, 1);
+                        localStorage.setItem('gpu_gallery_v1', JSON.stringify(this.galleryItems));
+                        this.updateGalleryBadge();
+                        this.renderGallery();
+                    });
+
+                    grid.appendChild(card);
+                });
+            }
+
+            clearGallery() {
+                this.galleryItems = [];
+                localStorage.removeItem('gpu_gallery_v1');
+                this.updateGalleryBadge();
+                this.renderGallery();
+                this.showToast('הגלריה נוקתה בהצלחה');
+            }
+
+            showToast(msg) {
+                const toast = document.getElementById('toast');
+                document.getElementById('toastMsg').textContent = msg;
+                toast.classList.remove('opacity-0', 'pointer-events-none');
+                setTimeout(() => {
+                    toast.classList.add('opacity-0', 'pointer-events-none');
+                }, 2500);
+            }
+
+            renderFrame(timestamp) {
+                const gl = this.gl;
+                let srcWidth = 1280;
+                let srcHeight = 720;
+                let isReady = false;
+
+                if (this.activeSourceType === 'image' && this.uploadedImage) {
+                    srcWidth = this.uploadedImage.width;
+                    srcHeight = this.uploadedImage.height;
+                    isReady = true;
+                } else if (this.activeSourceType === 'procedural' && this.fallbackCanvas) {
+                    srcWidth = this.fallbackCanvas.width;
+                    srcHeight = this.fallbackCanvas.height;
+                    this.drawProceduralFrame(timestamp);
+                    isReady = true;
+                } else if (this.video.readyState >= this.video.HAVE_CURRENT_DATA) {
+                    srcWidth = this.video.videoWidth || 1280;
+                    srcHeight = this.video.videoHeight || 720;
+                    isReady = true;
+                }
+
+                if (isReady) {
+                    // Responsive high-performance dimension scaling
+                    const maxDim = 1280;
+                    let targetW = srcWidth;
+                    let targetH = srcHeight;
+                    if (targetW > maxDim || targetH > maxDim) {
+                        if (targetW > targetH) {
+                            targetH = Math.round((targetH * maxDim) / targetW);
+                            targetW = maxDim;
+                        } else {
+                            targetW = Math.round((targetW * maxDim) / targetH);
+                            targetH = maxDim;
+                        }
+                    }
+
+                    if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
+                        this.canvas.width = targetW;
+                        this.canvas.height = targetH;
+                    }
+
+                    // Bind active source to WebGL Texture
+                    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+                    if (this.activeSourceType === 'image' && this.uploadedImage) {
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.uploadedImage);
+                    } else if (this.activeSourceType === 'procedural' && this.fallbackCanvas) {
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.fallbackCanvas);
+                    } else {
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.video);
+                    }
+
+                    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+                    // Select Program
+                    const currentFilter = FILTERS[this.currentFilterIndex];
+                    const progObj = this.filterPrograms[currentFilter.id] || Object.values(this.filterPrograms)[0];
+
+                    if (progObj) {
+                        gl.useProgram(progObj.program);
+
+                        // Bind Buffers
+                        gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+                        gl.enableVertexAttribArray(progObj.attribs.position);
+                        gl.vertexAttribPointer(progObj.attribs.position, 2, gl.FLOAT, false, 0, 0);
+
+                        gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
+                        gl.enableVertexAttribArray(progObj.attribs.texCoord);
+                        gl.vertexAttribPointer(progObj.attribs.texCoord, 2, gl.FLOAT, false, 0, 0);
+
+                        // Set Uniform Parameters
+                        const p1 = parseFloat(document.getElementById('param1Slider').value);
+                        const p2 = parseFloat(document.getElementById('param2Slider').value);
+
+                        gl.uniform1i(progObj.uniforms.image, 0);
+                        gl.uniform2f(progObj.uniforms.resolution, gl.canvas.width, gl.canvas.height);
+                        gl.uniform1f(progObj.uniforms.time, timestamp * 0.001);
+                        gl.uniform1f(progObj.uniforms.param1, p1);
+                        gl.uniform1f(progObj.uniforms.param2, p2);
+
+                        // Draw Scene
+                        gl.drawArrays(gl.TRIANGLES, 0, 6);
+                    }
+                }
+
+                requestAnimationFrame(this.renderFrame.bind(this));
+            }
+        }
+
+        // Initialize App on Window Load
+        window.addEventListener('load', () => {
+            window.gpuApp = new MobileGPUCameraApp();
+        });
+    </script>
+</body>
+</html>
